@@ -1,0 +1,5 @@
+[env]
+# Copy to .cargo/config.toml and edit. Qt Bridge (via cxx-qt-build) locates Qt
+# through qmake. Point it at your Qt >= 6.10
+# install downloaded from download.qt.io; override by exporting QMAKE yourself.
+QMAKE = { value = "/path/to/Qt/6.12.1/gcc_64/bin/qmake", force = false }

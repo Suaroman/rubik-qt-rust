@@ -1,0 +1,22 @@
+[package]
+name = "rubik_qt"
+version = "0.1.0"
+edition = "2024"
+description = "Rubik's Cube DNA observatory - the Rust engine with a Qt Quick / Qt Quick 3D front end via Qt Bridges"
+
+[dependencies]
+# Qt Bridge for Rust (Technology Preview). Needs Qt >= 6.10 with `qmake` findable:
+# see README.md. The `serde_json` feature lets a slot hand QML a plain JS object.
+qtbridge = { version = "0.4", features = ["serde_json"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# Windows only: pick the discrete GPU on hybrid-graphics laptops (see main.rs).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Graphics_Dxgi"] }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"

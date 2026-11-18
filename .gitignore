@@ -1,0 +1,7 @@
+/target
+/dist
+build.log
+# machine-specific Qt path; see .cargo/config.toml.example
+/.cargo/config.toml
+# the original task prompt
+/PROMPT.md

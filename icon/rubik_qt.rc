@@ -1,0 +1,8 @@
+// Windows icon resource for rubik_qt.exe (compiled by build.rs on Windows).
+//
+// The name matters: Qt's Windows platform plugin loads the resource called
+// IDI_ICON1 from the executable as the default icon for every window it
+// creates, so this one entry gives the titlebar, taskbar and Alt-Tab icon as
+// well as the file icon Explorer shows. icon.ico (16-256 px, each size
+// rasterised separately) is the softbuffer version's icon.
+IDI_ICON1 ICON "icon.ico"

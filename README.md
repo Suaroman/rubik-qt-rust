@@ -1,10 +1,10 @@
 <div align="center">
 
-# Rubik's Cube · Rust × Qt
+# Rubik's Cube · HTML → Rust → Qt
 
-**A Rubik's Cube "observatory" written in Rust: a hand-written software renderer was replaced with Qt Quick 3D.**
-
-The puzzle engine is identical. The renderer is new, and so is everything you can do with it.
+**One Rubik's Cube visualisation in three forms: a single-file HTML page, an AI conversion
+of that page to native Rust, and this repository, a Qt Quick 3D version of the Rust app
+built on Qt Bridges.**
 
 ![Rust](https://img.shields.io/badge/Rust-2024_edition-b7410e?logo=rust&logoColor=white)
 ![Qt](https://img.shields.io/badge/Qt-6.12-41cd52?logo=qt&logoColor=white)
@@ -15,7 +15,8 @@ The puzzle engine is identical. The renderer is new, and so is everything you ca
 
 <img src="docs/images/hero.gif" alt="The Qt version: a physically based 3D cube mid-turn, with the DNA net and lighting instruments on either side" width="100%">
 
-<sub>Live capture. The cube, the unfolded "DNA" net on the left and the lighting instrument on the right are all driven by one Rust simulation, frame by frame.</sub>
+<sub>Live capture of the Qt version. The cube, the unfolded "DNA" net (left) and the lighting
+instrument (right) are all driven by one Rust simulation, frame by frame.</sub>
 
 </div>
 
@@ -23,58 +24,80 @@ The puzzle engine is identical. The renderer is new, and so is everything you ca
 
 ## Contents
 
-- [Before → After](#before--after)
-- [Why Qt? Eight things it bought this project](#why-qt-eight-things-it-bought-this-project)
+- [The journey: HTML → Rust → Qt](#the-journey-html--rust--qt)
+- [Same moment, three renderers](#same-moment-three-renderers)
+- [Why Qt? Eight things it gave this project](#why-qt-eight-things-it-gave-this-project)
 - [Architecture](#architecture)
 - [Features & controls](#features--controls)
 - [Build & run](#build--run) · [Windows](#windows-11) · [Linux / WSL](#linux--wsl)
 - [Engineering notes](#engineering-notes)
+- [How this was built](#how-this-was-built)
 - [The full write-up →](docs/WRITEUP.md)
 
 ---
 
-## Before → After
+## The journey: HTML → Rust → Qt
 
-The first version was a native Rust port of a single-page HTML Canvas demo. It had **no
-GPU and no UI toolkit**: `winit` opened a window, `softbuffer` handed it pixels, and every
-pixel came from code in the repo. That meant a ~1,000-line scan-line rasteriser, a
-font renderer, a CSS-like layout engine and a painter's-algorithm 3D pass. It worked, and
-profiling made it fast enough, but every new visual idea meant writing more rasteriser.
+| | Stage | What it is | How it was made |
+|---|---|---|---|
+| **1** | **HTML page** | `rubiks-cube-DNA.html`: one self-contained 2,994-line file with no dependencies. Canvas 2D draws the cube; a responsive DOM/CSS HUD surrounds it; two more canvases hold a lighting instrument and a "cube DNA" instrument; self-tests are built in. | Grew over three iterations: the cube (970 lines), then the lighting panel (1,708), then the DNA panel (2,994) |
+| **2** | **Native Rust** | The same page as a desktop program, with no browser. `winit` opens the window, `softbuffer` takes the pixels, and everything the browser used to provide is rebuilt in Rust: a Canvas 2D rasteriser, text rendering, and the CSS layout. | An **AI prompt converted the HTML to Rust**, followed by a profiling pass that took the Windows build from 9 to about 30 fps at 4K |
+| **3** | **Rust + Qt** *(this repo)* | The Rust engine is kept as it is. The browser-replacement layer is retired, and Qt Quick and Qt Quick 3D do the presentation, connected to Rust through **[Qt Bridges](https://www.qt.io/development/qt-framework/qt-bridges/rust-gui)**. | **AI was asked to implement a Qt version**, following Qt's Qt Bridges tutorial |
 
-The Qt version keeps the **engine unchanged** (`src/engine/`: cube state,
-quarter-turn algebra, timeline, sticker-permutation net, lighting model; the only diff
-is one `use` line, because `Color` moved out of the deleted graphics module). It hands
-presentation to Qt Quick and Qt Quick 3D, connected to Rust through
-**[Qt Bridges](https://www.qt.io/development/qt-framework/qt-bridges/rust-gui)**.
+The interesting step is the second one. Converting a web page to native code means losing
+the browser, and the browser was doing a lot: drawing paths and gradients, laying out text,
+applying CSS, compositing layers. The Rust conversion faithfully rebuilt all of that by
+hand, which is why its presentation code alone is about **4,240 lines** around an
+898-line puzzle engine.
 
-#### Same engine, same instant (t = 4.75 s, mid-turn of `B`), two renderers
+**Qt gives those services back natively, plus a GPU 3D engine the HTML page never had.**
+That's the core of this project's "after".
 
-<img src="docs/images/same-moment-cube.png" alt="Left: flat-shaded software render. Right: Qt Quick 3D render of the identical pose" width="100%">
+---
+
+## Same moment, three renderers
+
+All three versions share the same deterministic clock, so each can render an exact instant.
+Here is t = 4.75 s, a quarter turn of the back face, half done:
+
+<img src="docs/images/same-moment-three-way.png" alt="The same cube pose rendered by the HTML page, the Rust conversion and the Qt version" width="100%">
+
+The Rust conversion matches the HTML page almost pixel for pixel, which shows how faithful it
+is. The Qt version shows the **identical state** (same pose, same slice angle, same
+counters) rendered with rounded geometry, physically based materials, image-based lighting
+and shadows.
 
 <table>
 <tr>
-<th width="50%">Before: hand-written software renderer</th>
-<th width="50%">After: Qt Quick + Qt Quick 3D</th>
+<th width="33%">1 · HTML page</th>
+<th width="33%">2 · Rust conversion</th>
+<th width="33%">3 · Rust + Qt</th>
 </tr>
 <tr>
-<td><img src="docs/images/before-softbuffer.png" alt="Original softbuffer version"></td>
-<td><img src="docs/images/after-qt.png" alt="Qt version"></td>
+<td><img src="docs/images/stage1-html.png" alt="Original HTML page"></td>
+<td><img src="docs/images/stage2-rust.png" alt="Rust conversion"></td>
+<td><img src="docs/images/stage3-qt.png" alt="Qt version"></td>
 </tr>
 <tr>
 <td>
 
-- Flat quads, painter's algorithm, Lambert shading
-- Supersampled 2× on the CPU for anti-aliasing
-- Hand-written text, gradients, dashes and round joins
-- Interaction: one key (`L`) and hovering the net
+- Canvas 2D, painter's algorithm
+- DOM + CSS HUD with media queries
+- Runs anywhere a browser does
 
 </td>
 <td>
 
-- Rounded cubies and bevelled stickers (meshes generated in Rust)
-- PBR plastic, HDR image-based lighting, soft shadows, SSAO, MSAA, bloom
-- Drag-to-orbit with inertia, zoom, 3D hover-picking, exploded view
-- Solve celebration: 3D confetti and shockwave rings
+- The same pixels, with no browser
+- A hand-built Canvas 2D, text and CSS layout
+- CPU rendering, 2× supersampled
+
+</td>
+<td>
+
+- Rounded cubies, bevelled stickers
+- PBR, HDR lighting, shadows, AO, bloom
+- Orbit, zoom, 3D picking, exploded view
 
 </td>
 </tr>
@@ -82,22 +105,18 @@ presentation to Qt Quick and Qt Quick 3D, connected to Rust through
 
 #### By the numbers
 
-| | Before (`winit` + `softbuffer`) | After (Qt Quick 3D via Qt Bridges) |
-|---|---|---|
-| Puzzle engine | 898 lines | **the same 898 lines**: one `use` line differs |
-| Presentation code<sup>1</sup> | ~4,240 lines of Rust | **~2,350 lines** (1,711 QML + Rust bridge/mesh) |
-| Custom rasteriser + font engine | 1,197 lines | **0**: Qt's scene graph and text stack |
-| Where pixels are made | CPU, every pixel | GPU (Direct3D 11 / Vulkan / OpenGL via Qt RHI) |
-| App CPU time per frame<sup>2</sup> | ~30 ms (cube 8 · DNA 7 · HUD 4 · convert 8 · blit 4) | **~2.3 ms** (Rust tick 0.7 + QML bindings 1.6) |
-| 3D | flat quads, no depth buffer | meshes, PBR, IBL, shadows, AO, bloom, particles |
-| Interaction | `L` key, net hover | orbit, zoom, pick, pause, time-scale, explode, help |
+| | 1 · HTML | 2 · Rust conversion | 3 · Rust + Qt |
+|---|---|---|---|
+| Size | 2,994 lines (HTML + CSS + JS, one file) | 898-line engine + **~4,240 lines** of presentation | the same 898-line engine + **~2,350 lines** (1,711 QML + Rust bridge/mesh) |
+| Who draws the pixels | the browser | the app, on the CPU, pixel by pixel | Qt, on the GPU (D3D11 / Vulkan / OpenGL) |
+| Text and layout | the browser (CSS) | hand-built (1,197-line rasteriser and font engine, ~560 lines of layout) | Qt Quick (QML anchors, `Text`) |
+| 3D | flat quads, depth-sorted | flat quads, depth-sorted | meshes, PBR, IBL, shadows, AO, bloom, particles |
+| App CPU per frame<sup>1</sup> | — | ~30 ms | **~2.3 ms** |
+| Interaction | `L` key, net hover | `L` key, net hover | orbit, zoom, 3D pick, pause, time scale, explode, help |
 
-<sub><sup>1</sup> Before: `gfx/` + `render/` + `ui/` + `main.rs`. After: `src/qml/` +
-`sim.rs` + `mesh.rs` + `main.rs`, with tests counted on both sides. Non-blank lines.
-<br><sup>2</sup> Before: the original project's own Tracy profiling on Windows (4K at
-250 %). After: measured in-app (`--quit-after`) on the same laptop (RTX A5000).
-The two measure different window sizes. The point is where the work lives, not a
-benchmark.</sub>
+<sub><sup>1</sup> Rust: the conversion's own Tracy profiling on Windows (4K at 250 %). Qt:
+measured in-app (`--quit-after`) on the same laptop (RTX A5000). Different window sizes;
+the point is where the work lives, not a benchmark. Line counts are non-blank.</sub>
 
 | Hover any cubie: it glows and is named | Exploded view (`E`) | Verified solve |
 |---|---|---|
@@ -105,15 +124,14 @@ benchmark.</sub>
 
 ---
 
-## Why Qt? Eight things it bought this project
+## Why Qt? Eight things it gave this project
 
 Each point links to the code that shows it.
 
 ### 1 · Rust stays Rust: Qt Bridges is a thin attribute layer
 
-The whole Rust ↔ QML surface is one struct with attributes. No C++, no `moc`
-headers to maintain, no FFI glue written by hand
-([`src/main.rs#L28`](src/main.rs#L28)):
+The whole Rust ↔ QML surface is one struct with attributes. No C++, no `moc` headers to
+maintain, no FFI glue written by hand ([`src/main.rs#L28`](src/main.rs#L28)):
 
 ```rust
 #[derive(Default)]
@@ -139,10 +157,18 @@ import rubik_qt            // the Cargo package name *is* the QML module
 FrameAnimation { onTriggered: win.f = Rubik.tick(frameTime) }
 ```
 
-The simulation ([`src/sim.rs`](src/sim.rs)) has no Qt dependency at all, so 18 unit
-tests run with plain `cargo test`.
+The simulation ([`src/sim.rs`](src/sim.rs)) has no Qt dependency at all, so 18 unit tests
+run with plain `cargo test`.
 
-### 2 · A production 3D renderer in ~30 lines of configuration
+### 2 · What the browser did, back as a native toolkit
+
+Converting to Rust meant re-implementing Canvas 2D, text and CSS layout by hand
+(about 1,750 lines). In the Qt version that code is simply **gone**. QML anchors and
+`Text` lay out the HUD ([`Hud.qml`](src/qml/Hud.qml)), `Behavior` and `ColorAnimation`
+replace CSS transitions, and `Window` + `FontLoader` handle high-DPI and fonts. The HUD
+reads like the HTML page's markup again rather than like a rasteriser.
+
+### 3 · A production 3D renderer in ~30 lines of configuration
 
 Physically based rendering, HDR image-based lighting, filmic tone mapping, SSAO, MSAA,
 specular anti-aliasing and multi-level bloom are **properties**, not projects
@@ -159,58 +185,54 @@ environment: ExtendedSceneEnvironment {
 }
 ```
 
-In the original, the equivalent of `glowEnabled` was a pre-blurred radial sprite written
-by hand, and anti-aliasing meant rendering the whole frame at twice the size and averaging
-pixels down.
+The HTML page drew flat quads sorted back to front, and so did the Rust conversion.
+Its glow was a pre-blurred sprite, and its anti-aliasing meant rendering twice the size and
+averaging down.
 
-### 3 · Rust-generated geometry, straight to the GPU
+### 4 · Rust-generated geometry, straight to the GPU
 
 The rounded cubie bodies and bevelled stickers are computed in Rust
 ([`src/mesh.rs#L72`](src/mesh.rs#L72)), with analytic normals and a winding test.
 QML hands them to the GPU through `ProceduralMesh`
-([`CubeView.qml#L38`](src/qml/CubeView.qml#L38)). There are no asset files to ship
-or convert.
-
-### 4 · The scene graph *is* the state: 26 nodes bound to the engine
-
-Each cubie is a `Node` whose position and quaternion are bound to the Rust snapshot
-([`CubeView.qml#L148`](src/qml/CubeView.qml#L148)). The partial slice turn is
-already composed in Rust ([`sim.rs#L277`](src/sim.rs#L277)), so the 3D view, the
-DNA net and the lighting panel can never disagree about the pose.
+([`CubeView.qml#L38`](src/qml/CubeView.qml#L38)). There are no asset files to ship or
+convert.
 
 ### 5 · Interaction that would have been weeks of work is a few lines
 
-- **3D hover picking**: `View3D.pick()` returns the sticker under the mouse. Rust maps
+- **3D hover picking**: `View3D.pick()` returns the sticker under the mouse, and Rust maps
   it to its net cell ([`CubeView.qml#L331`](src/qml/CubeView.qml#L331),
   [`main.rs#L85`](src/main.rs#L85)).
 - **Exploded view** with a spring: one `NumberAnimation` with `Easing.OutElastic`
   ([`Main.qml#L188`](src/qml/Main.qml#L188)).
 - **Confetti in the six sticker colours**: `ParticleSystem3D` with gravity
   ([`CubeView.qml#L246`](src/qml/CubeView.qml#L246)).
-- Colour fades, hover states and the title sheen are `Behavior` and `ColorAnimation`.
+- **Orbit with inertia**: the drag rotation is composed *into the engine's spin*, so the
+  lighting instrument keeps describing exactly what you see.
 
-### 6 · The HTML Canvas heritage ports almost line for line
+### 6 · The instruments went home to their original API
 
-The project began life as an HTML Canvas page. QML's `Canvas` uses the same Context2D
-API, so the DNA net's permutation arcs, travelling tiles and halos
-([`DnaPanel.qml#L128`](src/qml/DnaPanel.qml#L128)) and the lighting diagram
-([`LightingPanel.qml#L48`](src/qml/LightingPanel.qml#L48)) are close transliterations
-of the original drawing code. They didn't need redesigning.
+QML's `Canvas` speaks the same Context2D API as the HTML page. The DNA net's permutation
+arcs, travelling tiles and halos ([`DnaPanel.qml#L128`](src/qml/DnaPanel.qml#L128)) and
+the lighting diagram ([`LightingPanel.qml#L48`](src/qml/LightingPanel.qml#L48)) are back
+to `ctx.arc`, `createRadialGradient` and `setLineDash`, close to the page's own JavaScript.
+In the Rust conversion, each of those calls had needed its own rasteriser routine.
 
-### 7 · One binary, every backend, every platform
+### 7 · The scene graph *is* the state, and the frames are atomic
 
-QML, fonts and the HDR environment are compiled into the executable as Qt resources
-(`include_bytes_qml!`, [`main.rs#L251`](src/main.rs#L251)). Qt's RHI chooses
-Direct3D 11 on Windows, Vulkan or OpenGL on Linux, and Metal on macOS. The same QML runs on
-all of them, and `windeployqt` turns the build into a portable folder
-([`build-windows.ps1`](build-windows.ps1)).
+Each of the 26 cubies is a `Node` bound to the Rust snapshot
+([`CubeView.qml#L148`](src/qml/CubeView.qml#L148)). The partial slice turn is composed in
+Rust ([`sim.rs#L277`](src/sim.rs#L277)), and one snapshot per frame feeds the 3D view
+and both instruments, so they can never show different moments. The HTML page got that
+by drawing everything in one function. The Qt version keeps the guarantee.
 
-### 8 · Platform polish comes with the toolkit
+### 8 · One binary, every backend, real platform polish
 
-High-DPI scaling, multi-monitor placement (`--screen N`), cursor shapes, font
-fallback and the window icon all come from Qt. For the icon, it uses the `IDI_ICON1`
-resource embedded by [`build.rs`](build.rs) and [`icon/rubik_qt.rc`](icon/rubik_qt.rc).
-The original had to hand-roll each of these.
+QML, fonts and the HDR environment are compiled into the executable
+(`include_bytes_qml!`, [`main.rs#L251`](src/main.rs#L251)). Qt's RHI picks Direct3D 11
+on Windows, Vulkan or OpenGL on Linux, and Metal on macOS. `windeployqt` produces a portable
+folder ([`build-windows.ps1`](build-windows.ps1)). The window icon is one embedded
+`IDI_ICON1` resource ([`build.rs`](build.rs), [`icon/rubik_qt.rc`](icon/rubik_qt.rc)),
+and multi-monitor placement (`--screen N`) and high-DPI scaling come from Qt.
 
 ---
 
@@ -218,6 +240,7 @@ The original had to hand-roll each of these.
 
 ```mermaid
 flowchart LR
+    H0["rubiks-cube-DNA.html<br/>(original page)"] -. "AI conversion" .-> E
     subgraph Rust["Rust (no Qt dependency)"]
         E["engine/<br/>cube · moves · timeline<br/>net · light"]
         S["sim.rs<br/>DNA state machine<br/>pause · speed · orbit<br/>snapshot()"]
@@ -241,12 +264,12 @@ flowchart LR
 
 | Path | What lives there |
 |---|---|
-| [`src/engine/`](src/engine) | The puzzle: 26 cubies, exact quarter-turn algebra, scramble/solve timeline, canonical net, lighting model. **Unchanged from the original** (one import line differs). |
-| [`src/sim.rs`](src/sim.rs) | The DNA panel's state machine (ported), new controls, and `snapshot()`: one JSON object per frame describing everything on screen |
+| [`src/engine/`](src/engine) | The puzzle, as converted from the page's JavaScript: 26 cubies, exact quarter-turn algebra, scramble/solve timeline, canonical net, lighting model. Carried over from the Rust conversion unchanged (one import line differs). |
+| [`src/sim.rs`](src/sim.rs) | The DNA panel's state machine, the new controls, and `snapshot()`: one JSON object per frame describing everything on screen |
 | [`src/mesh.rs`](src/mesh.rs) | Procedural geometry for Qt Quick 3D |
 | [`src/main.rs`](src/main.rs) | The Qt Bridges singleton, CLI, and GPU selection on Windows and WSL |
 | [`src/qml/`](src/qml) | The UI: `Main`, `CubeView` (3D), `Hud`, `DnaPanel`, `LightingPanel`, `Background`, small components |
-| [`tests/`](tests) | Ported self-checks of the net mapping and solve sequence |
+| [`tests/`](tests) | The page's own `selfTest()` / `verifySequence()` checks, ported |
 | [`tools/make_studio_hdr.py`](tools/make_studio_hdr.py) | Generates the HDR studio light probe (standard library only) |
 
 ---
@@ -269,7 +292,8 @@ flowchart LR
 | `H` / `?` | help overlay |
 | `Esc` | close help / quit |
 
-Every cycle ends with a verified solve, printed as `[cube] cycle 001 after solve sequence: SOLVED`.
+Every cycle ends with a verified solve, printed as `[cube] cycle 001 after solve sequence: SOLVED`,
+the same line the HTML page logged to its console.
 
 <details>
 <summary><b>Command-line options</b></summary>
@@ -313,7 +337,7 @@ GPU itself. See [Engineering notes](#engineering-notes).
 export QMAKE=~/Qt/6.12.1/gcc_64/bin/qmake
 cargo build --release
 ./target/release/rubik_qt
-cargo test --release         # 18 tests: engine self-checks, meshes, simulation
+cargo test --release         # 18 tests: the page's self-checks, meshes, simulation
 ```
 
 `build.rs` bakes Qt's library path into the binary, so `LD_LIBRARY_PATH` isn't needed.
@@ -326,21 +350,31 @@ A few things that weren't obvious, and how they were solved:
 
 - **Hybrid GPUs pick the wrong adapter.** Qt's D3D11 backend uses DXGI adapter 0, which on
   Optimus laptops is the integrated Intel GPU. The app enumerates the adapters and
-  selects the one with the most dedicated VRAM
-  ([`main.rs#L187`](src/main.rs#L187)).
-- **`std::env::set_var` is invisible to Qt on Windows.** Qt reads the C runtime's copy
-  of the environment, so the value is also set with `_putenv_s`
+  selects the one with the most dedicated VRAM ([`main.rs#L187`](src/main.rs#L187)).
+- **`std::env::set_var` is invisible to Qt on Windows.** Qt reads the C runtime's copy of
+  the environment, so the value is also set with `_putenv_s`
   ([`main.rs#L215`](src/main.rs#L215)).
 - **WSL silently falls back to CPU rendering** (Mesa's Zink driver fails). Selecting the
   `d3d12` Gallium driver and XWayland is a 10× speed-up, applied automatically
   ([`main.rs#L150`](src/main.rs#L150)).
 - **A `Repeater` fed a per-frame array rebuilds its delegates every frame.** All per-frame
   data is indexed through fixed-count models instead.
-- **QML text measured in em.** CSS `letter-spacing` from the original page maps to
+- **CSS letter-spacing is measured in em.** The page's CSS `letter-spacing` maps to
   `font.letterSpacing = em × px` ([`Label2.qml`](src/qml/Label2.qml)).
 
-The [full write-up](docs/WRITEUP.md) covers the migration step by step: what moved,
-what was deleted, what it cost, and what Qt made possible.
+---
+
+## How this was built
+
+This project is an experiment in **AI-assisted porting**, directed by the author:
+
+1. The HTML page came first, built up over three iterations.
+2. An AI coding assistant was prompted to convert that page to native Rust (stage 2).
+3. An AI coding assistant was then asked to create a Qt version of the Rust app using
+   Qt Bridges (stage 3), keeping the converted engine and adding the UI enhancements.
+
+The [full write-up](docs/WRITEUP.md) tells the story step by step: what each stage
+inherited, what Qt replaced, what went wrong, and what it cost.
 
 ---
 

@@ -1,79 +1,107 @@
-# From a hand-written rasterizer to Qt Quick 3D
+# HTML → Rust → Qt: one Rubik's Cube, three renderers
 
-*Moving a Rust application to Qt with Qt Bridges: what moved, what was deleted, what it
-cost, and what it made possible.*
+*How a single-file HTML page became a native Rust program through an AI conversion, and
+then a Qt Quick 3D application through Qt Bridges. What each stage inherited, what Qt
+replaced, what went wrong, and what it cost.*
 
-<img src="images/same-moment-cube.png" alt="The same engine state rendered by the original software renderer (left) and by Qt Quick 3D (right)" width="100%">
+<img src="images/same-moment-three-way.png" alt="The same cube state rendered by the HTML page, the Rust conversion and the Qt version" width="100%">
 
-<sub>Same engine, same clock reading (t = 4.75 s, a quarter turn of the back face half done).
-Left: the original CPU renderer. Right: the Qt version.</sub>
+<sub>The same clock reading (t = 4.75 s, the back face half way through a quarter turn),
+rendered by all three stages.</sub>
 
 ---
 
 ## TL;DR
 
-- The application is a Rubik's Cube "observatory". A 3×3×3 cube scrambles and solves
-  itself in a loop. Two instruments explain it: an unfolded **DNA net** showing each
-  quarter turn as a permutation of 54 stickers, and a **lighting diagram** showing the
-  shading model.
-- Version 1 was pure Rust: `winit` for the window, `softbuffer` for pixels, and roughly
-  **4,240 lines** of hand-written rasterizer, font engine, layout engine and painter's-algorithm
-  3D.
-- Version 2 keeps the **898-line engine unchanged** and replaces the whole presentation
-  layer with **Qt Quick + Qt Quick 3D**, connected by **Qt Bridge for Rust**. The new
-  presentation layer is about **2,350 lines** and adds physically based 3D, image-based
-  lighting, shadows, bloom, particles, 3D picking, orbit/zoom, an exploded view and a
-  help overlay.
-- Application CPU time per frame fell from about **30 ms** (CPU rasterizing everything)
-  to about **2.3 ms** (a Rust simulation step plus QML bindings). Pixels are now made on
-  the GPU.
-- The costs are real: a much larger deployment (an 86 MB folder versus one 2.7 MB
-  exe), a technology-preview binding layer, a Qt 6.10+ requirement, and the loss of
-  bit-identical cross-platform frames. They're covered honestly in [Costs](#7--the-costs).
+- **Stage 1** is an HTML page: one self-contained 2,994-line file. Canvas 2D draws a
+  3×3×3 cube that scrambles and solves itself in a loop. A responsive DOM/CSS HUD frames
+  it, and two more canvases explain it: a **lighting** instrument and a **"cube DNA"**
+  net that shows each quarter turn as a permutation of 54 stickers.
+- **Stage 2**: an **AI prompt converted the page to native Rust**. With no browser, the
+  conversion had to rebuild what the browser provided (a Canvas 2D rasterizer, text
+  rendering, CSS layout), so it came to about **4,240 lines** of presentation code
+  around an **898-line** puzzle engine. It's faithful: its frames match the page almost
+  pixel for pixel.
+- **Stage 3**: **AI was asked to implement a Qt version** with Qt Bridges. It keeps the
+  Rust engine unchanged, retires the browser-replacement layer, and hands presentation to
+  **Qt Quick and Qt Quick 3D**. The new presentation layer is about **2,350 lines** and adds
+  physically based 3D, image-based lighting, shadows, bloom, particles, 3D picking,
+  orbit/zoom and an exploded view.
+- App CPU time per frame fell from about **30 ms** (stage 2, rasterizing everything on the
+  CPU) to about **2.3 ms** (stage 3: a Rust simulation step plus QML bindings). Pixels are
+  now made on the GPU.
+- The costs are real: an 86 MB deployment folder instead of a single 2.7 MB exe, a
+  technology-preview binding layer, a Qt 6.10+ requirement, and no more bit-identical
+  frames across platforms. See [§8](#8--the-costs).
 
 ---
 
-## 1 · Where it started
+## 1 · Stage 1: the HTML page
 
-Version 1 was itself a port: a single HTML page with a Canvas 2D cube, a DOM HUD and two
-canvas instruments, rewritten as a native Rust program. The constraints were deliberately
-strict: no browser, no GPU API, no UI toolkit.
+`rubiks-cube-DNA.html` is where the project began, and it was built up in three steps on the
+same day:
 
-| Layer | Version 1 implementation | Lines |
+| Iteration | Lines | Added |
 |---|---|---|
-| Puzzle engine | `engine/`: cubies, quarter-turn algebra, timeline, net mapping, light | 898 |
-| Rasterizer | `gfx/canvas.rs`: scan-line fill, thick lines with round joins, dashes, gradients, rounded rects, sprite blits | 990 |
-| Text | `gfx/font.rs`: `ab_glyph`, CSS letter-spacing, alignment, baselines | 207 |
-| Layout | `ui/layout.rs`, `ui/metrics.rs`: the page's CSS box model, resolved by hand | 564 |
-| Drawing | `ui/hud.rs`, `ui/lighting.rs`, `ui/dna.rs`, `render/cube.rs` | 1,959 |
-| Window loop | `main.rs` | 407 |
+| `rubiks-cube.html` | 970 | the cube: Canvas 2D, perspective projection, painter's algorithm, Lambert shading, the scramble/solve timeline, the corner HUD |
+| `rubiks-cube-v2-lighting.html` | 1,708 | the **lighting / spatial analysis** rail: a world-space diagram of the light, the reference cube and the face-illumination table |
+| `rubiks-cube-DNA.html` | 2,994 | the **cube DNA / state observatory** rail: the 54-sticker net, permutation arcs for every turn, travelling tiles, integrity meters, hover inspection |
 
-It was good engineering. The engine has a deterministic clock, so the pose is a pure
-function of time. A headless `--png` mode produced **bit-identical** frames on Linux and
-Windows. A whole profiling campaign took the Windows build from 9 to about 30 fps at 4K.
+The page is a careful piece of work. The cube's pose is a pure function of a monotonic
+clock. Stickers live in cubie-local space, so colours are carried by the pieces rather than
+repainted. The net is read from the cube's state rather than kept as a second copy.
+`verifySequence()` checks at load that the solve really inverts the scramble,
+`selfTest()` is exposed through a `window.DNA_DEBUG` hook for validation runs, and each
+solve logs
+`[cube] cycle 001 after solve sequence: SOLVED`. The browser does the rest: Canvas 2D
+paths, gradients, `shadowBlur` and dashes; CSS custom properties and a dozen media queries
+for the HUD; fonts, high-DPI and compositing.
 
-The cost showed up whenever the design changed. Anti-aliasing meant rendering at twice the
-size and averaging down. A glow meant a pre-blurred sprite. Any new visual idea meant
-more rasterizer code, and any new interaction meant hand-written hit testing.
+## 2 · Stage 2: the AI conversion to Rust
 
-## 2 · Why Qt
+An AI prompt converted the page to a native Rust program. The constraints were strict: no
+browser, no GPU API, no UI toolkit. `winit` opens a window and `softbuffer` hands it pixels.
 
-The goal was a much richer UI without giving up the Rust engine. The requirements:
+So everything the page took from the browser had to be rebuilt:
+
+| What the browser provided | What the conversion built in Rust | Lines |
+|---|---|---|
+| — (the page's JavaScript logic) | `engine/`: cubies, quarter-turn algebra, timeline, net mapping, light | 898 |
+| Canvas 2D | `gfx/canvas.rs`: scan-line fill, thick lines with round joins, dashes, gradients, rounded rects, sprite blits | 990 |
+| text rendering | `gfx/font.rs`: `ab_glyph`, CSS letter-spacing, alignment, baselines | 207 |
+| CSS layout and media queries | `ui/layout.rs`, `ui/metrics.rs`: the page's box model, resolved by hand | 564 |
+| the DOM HUD + canvas drawing | `ui/hud.rs`, `ui/lighting.rs`, `ui/dna.rs`, `render/cube.rs` | 1,959 |
+| the event loop | `main.rs` | 407 |
+
+The result is impressively faithful. Its `--png --at <t>` mode renders frames that line up
+with the page's (see the comparison above), and they are **bit-identical** between Linux
+and Windows. A profiling pass took the Windows build from 9 fps to about 30 fps at 4K.
+
+But the conversion also shows the cost of leaving the browser. Anti-aliasing became
+"render at twice the size and average down". `shadowBlur` became a pre-blurred sprite.
+Every new visual idea would need more rasterizer, and every new interaction its own hit
+testing.
+
+## 3 · Stage 3: why Qt
+
+The goal for the next step was a much richer UI without giving up the Rust code. The
+requirements:
 
 1. **Keep the engine in Rust, untouched**, and keep it testable without a GUI.
-2. **Real GPU 3D** with modern materials, plus 2D instrument panels that were already
-   written against a Canvas-style API.
-3. **Declarative UI** for HUD layout, states and animations, instead of hand-rolled layout.
+2. **Get the browser's services back natively**: text, layout, styling, animation.
+3. **Real GPU 3D** with modern materials, plus 2D instrument panels whose drawing code was
+   written for a Canvas-style API.
 4. **Windows and Linux** from one codebase.
 
-Qt meets all four. Qt Quick is declarative and GPU-backed, and Qt Quick 3D is a full PBR
-renderer built on the same scene graph. QML's `Canvas` uses the HTML Context2D API that
-the original instruments were written in. **Qt Bridge for Rust** (crate `qtbridge`, a
-technology preview) exposes Rust structs to QML with attributes rather than a C++ layer.
+Qt meets all four. Qt Quick is declarative and GPU-backed, much as the DOM/CSS layer was.
+Qt Quick 3D is a full PBR renderer on the same scene graph. QML's `Canvas` speaks the
+HTML Context2D API that the instruments were originally written in. **Qt Bridge for
+Rust** (crate `qtbridge`, a technology preview, used here following Qt's own
+tutorial) exposes Rust structs to QML with attributes instead of a C++ layer.
 
-## 3 · The design: one bridge object, one snapshot per frame
+## 4 · The design: one bridge object, one snapshot per frame
 
-Many fine-grained Qt properties with change signals was the obvious alternative. Instead,
+The obvious alternative was many fine-grained Qt properties with change signals. Instead,
 the Rust side exposes **one singleton with a handful of slots**:
 
 ```rust
@@ -86,9 +114,9 @@ impl Rubik {
 }
 ```
 
-QML drives the clock. A `FrameAnimation` calls `Rubik.tick(frameTime)`, and the result,
-a `serde_json::Value` that QtBridge delivers as a plain JS object, becomes the single
-source of truth for that frame:
+QML drives the clock, as `requestAnimationFrame` did in the page. A `FrameAnimation`
+calls `Rubik.tick(frameTime)`, and the result, a `serde_json::Value` that QtBridge delivers
+as a plain JS object, becomes the single source of truth for that frame:
 
 ```qml
 FrameAnimation { onTriggered: win.f = Rubik.tick(frameTime) }
@@ -98,30 +126,35 @@ CubeView { frame: win.f }   DnaPanel { frame: win.f }   LightingPanel { frame: w
 Why this works well:
 
 - **Atomic frames.** The 3D cube, the net and the lighting panel all read the same
-  snapshot, so they can't show different moments. Version 1 had the same guarantee
-  because it drew everything in one function. A snapshot keeps it.
-- **Qt-free simulation.** `sim.rs` is ordinary Rust with no Qt types, so its behaviour is
-  unit-tested with `cargo test`: quaternion conversion, light orientation, pause and
-  time scale, the user orbit reaching the lighting panel, and picking.
-- **It's cheap.** Measured: the Rust step plus conversion takes about 0.7 ms per frame,
-  and applying the bindings about 1.6 ms.
+  snapshot, so they can't show different moments. The page got this by drawing everything
+  from one `frame()` function. The snapshot keeps that property across the language
+  boundary.
+- **Qt-free simulation.** `sim.rs` is ordinary Rust, unit-tested with `cargo test`:
+  quaternion conversion, light orientation, pause and time scale, the user orbit reaching
+  the lighting panel, and 3D picking.
+- **It's cheap.** Measured: the Rust step plus conversion takes about 0.7 ms per frame, and
+  applying the bindings about 1.6 ms.
 
 The 3D view keeps the engine's semantics exactly. Each cubie's transform is
-`spin × slice_turn × orientation`, as in the original renderer. The slice turn is
+`spin × slice_turn × orientation`, as in the page's own renderer. The slice turn is
 composed in Rust ([`sim.rs`](../src/sim.rs)) and the global spin is applied to a parent node.
 
-## 4 · The migration, step by step
+## 5 · The Qt implementation, step by step
 
-**Getting Qt.** Qt Bridges needs Qt ≥ 6.10, and Ubuntu 24.04's packages are 6.4. Qt
-6.12.1 was installed from the official `download.qt.io` archives, on Linux and for
-MSVC on Windows. A "hello counter" checked the toolchain before any real code was
-written.
+**Getting Qt.** Qt Bridges needs Qt ≥ 6.10, and Ubuntu 24.04's packages are 6.4. Qt 6.12.1
+was installed from the official `download.qt.io` archives, on Linux and for MSVC on
+Windows. A "hello counter" proved the toolchain before any real code was written.
 
-**Porting the instruments.** The DNA net and the lighting diagram became QML `Canvas`
-items. Version 1's drawing calls were themselves a port of Context2D code, so the port
-mostly turned Rust calls back into the JavaScript they came from: `stroke_rrect` became
-`roundRect` plus `stroke`, and so on. The panel's *state machine* (in-flight permutation
-plans, commit pulses, the solved flash) stayed in Rust, verbatim, in `sim.rs`.
+**The instruments went home to Context2D.** The DNA net and the lighting diagram became QML
+`Canvas` items, back on `arc`, `arcTo`, `setLineDash` and `createRadialGradient`: the same
+calls the HTML page used. In stage 2 each of those calls had needed its own rasterizer
+routine. The panel's *state machine* (in-flight permutation plans, commit pulses, the
+solved flash) stayed in Rust, in `sim.rs`.
+
+**The HUD went back to declarative layout.** The corner blocks (wordmark, telemetry, move
+lanes, status) are QML items with anchors, much like the page's CSS-positioned panels.
+The page's `letter-spacing` in em maps to `font.letterSpacing = em × px`, and its CSS
+transitions became `Behavior` and `ColorAnimation`.
 
 **Building the 3D scene.**
 
@@ -131,11 +164,11 @@ plans, commit pulses, the solved flash) stayed in Rust, verbatim, in `sim.rs`.
 - **Materials.** `PrincipledMaterial`: matte charcoal plastic, plus glossy stickers with a
   clear-coat layer.
 - **Light.** The engine's light vector, the same one the lighting panel reports, drives a
-  shadow-casting `DirectionalLight` through a quaternion computed in Rust. Orbit the
-  light with `L` and the shading, shadows and instrument all move together.
-- **Environment.** A procedural HDR "photo studio" (soft boxes, a rim strip) gives the
-  stickers something to reflect. It's generated by a dependency-free Python script
-  ([`tools/make_studio_hdr.py`](../tools/make_studio_hdr.py)) as Radiance RGBE.
+  shadow-casting `DirectionalLight`. Orbit it with `L` and the shading, shadows and
+  instrument move together.
+- **Environment.** A procedural HDR "photo studio" gives the stickers something to reflect.
+  It's generated by a dependency-free Python script
+  ([`tools/make_studio_hdr.py`](../tools/make_studio_hdr.py)).
 - **Post-processing.** `ExtendedSceneEnvironment`: filmic tone mapping, SSAO, MSAA,
   specular AA and bloom, all as properties.
 
@@ -152,12 +185,13 @@ plans, commit pulses, the solved flash) stayed in Rust, verbatim, in `sim.rs`.
 | Solve celebration | `ParticleSystem3D` + 2D rings | fired by a counter that bumps on each *verified* solve |
 | Pause / time scale | dock buttons + keys | `Sim::step` scales the clock |
 
-**Keeping it verifiable.** Version 1's `--png --at <t>` mode was too useful to lose. The
-Qt version has `--shot out.png --at <t>`: the same 60 Hz pre-roll, then
-`grabToImage`. Every screenshot in this repository came from it, including the matched
-before/after pairs, rendered by both binaries at identical clock readings.
+**Keeping it verifiable.** All three stages can render an exact instant: the Rust
+conversion with `--png --at`, the Qt version with `--shot --at` (the same 60 Hz pre-roll,
+then `grabToImage`), and the HTML page in a headless browser, with the same pre-roll
+injected into a scratch copy. Every comparison image in this repository came from those
+modes, at identical clock readings.
 
-## 5 · What went wrong (and the fixes)
+## 6 · What went wrong (and the fixes)
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -169,24 +203,24 @@ before/after pairs, rendered by both binaries at identical clock readings.
 | 3 fps under WSL | Mesa's Zink driver fails and Qt silently falls back to llvmpipe | select `GALLIUM_DRIVER=d3d12` and XWayland automatically |
 | Running on the Intel iGPU on Windows | Qt's D3D11 backend takes DXGI adapter 0 | enumerate adapters and pick the one with the most VRAM |
 | …and the fix didn't apply | Qt reads the **C runtime's** copy of the environment, which `std::env::set_var` doesn't update | also call `_putenv_s` |
+| Hovering the 3D cube did nothing | only the net was hoverable, and the help text said "hover net" | `View3D.pick()` hover on the cube itself, plus clearer help |
 | Build "succeeded" but the old exe remained | the app was running and `dist\rubik_qt.exe` was locked | the script now fails loudly |
 | Generic window icon | — | embed `IDI_ICON1`, which Qt uses for every window |
 
-## 6 · Results
+## 7 · Results
 
-| | Before | After |
+| | 1 · HTML | 2 · Rust conversion | 3 · Rust + Qt |
+|---|---|---|---|
+| Code | 2,994 lines, one file | 898 engine + ~4,240 presentation | 898 engine + ~2,350 presentation |
+| Rendering | browser Canvas 2D, flat quads | CPU rasterizer, flat quads | GPU, PBR meshes, IBL, shadows, AO, bloom, particles |
+| App CPU per frame | — | ~30 ms | ~2.3 ms |
+| Interaction | `L`, net hover | `L`, net hover | orbit, zoom, 3D pick, pause, time scale, explode, help |
+| Ships as | one `.html` file | one 2.7 MB `.exe` | 2.9 MB `.exe` + 86 MB Qt folder |
+
+| 1 · HTML, verified solve | 2 · Rust, verified solve | 3 · Qt, verified solve |
 |---|---|---|
-| Presentation code | ~4,240 lines of Rust | ~2,350 lines (1,711 QML + Rust bridge/mesh) |
-| Rasterizer + font engine | 1,197 lines | none (Qt) |
-| Rendering | CPU, flat quads, painter's algorithm | GPU, PBR meshes, IBL, shadows, AO, bloom, particles |
-| App CPU per frame | ~30 ms | ~2.3 ms |
-| Interaction | `L` key, net hover | orbit, zoom, 3D pick, pause, time scale, explode, help |
-| Tests | net / canvas / hover | net self-checks + meshes + simulation (18) |
-
-| Before: verified solve | After: verified solve |
-|---|---|
-| ![before solved](images/before-softbuffer-solved.png) | ![after solved](images/solved-celebration.png) |
-| *t = 15.5 s in the original: the net flashes green.* | *The same moment in the Qt version: the net flash, plus 3D confetti in the six sticker colours and shockwave rings.* |
+| ![html solved](images/stage1-html-solved.png) | ![rust solved](images/stage2-rust-solved.png) | ![qt solved](images/solved-celebration.png) |
+| *t = 15.5 s: the net flashes green.* | *The same moment, the same flash.* | *The same flash, plus 3D confetti in the six sticker colours and shockwave rings.* |
 
 | | |
 |---|---|
@@ -194,42 +228,43 @@ before/after pairs, rendered by both binaries at identical clock readings.
 | *Hover any cubie: it glows, a tooltip names it, and its sticker is ringed in the net.* | *Exploded view: the cubies spring apart and keep turning.* |
 
 On the development laptop (RTX A5000, three monitors) the Qt build runs at 47–60 fps
-depending on which monitor, and therefore which GPU, drives the window. Each display is
-wired to a different adapter, so frame pacing is decided by the compositor rather than by
-the app. The app's own frame work is about 2 ms.
+depending on which monitor, and therefore which GPU, drives the window. The app's own
+frame work is about 2 ms.
 
-## 7 · The costs
+## 8 · The costs
 
-A migration write-up that only lists wins isn't worth much. Here's what Qt cost:
+A write-up that only lists wins isn't worth much. Here's what Qt cost:
 
-- **Deployment size.** Version 1 was a single, statically linked 2.7 MB `.exe`. Version 2
-  is a 2.9 MB exe plus an **86 MB** folder of Qt DLLs, QML plugins and the MSVC runtime
-  (`windeployqt`). Trimming is possible but was not attempted.
+- **Deployment size.** Stage 1 is one HTML file and stage 2 a single 2.7 MB `.exe`.
+  Stage 3 is a 2.9 MB exe plus an **86 MB** folder of Qt DLLs, QML plugins and the MSVC
+  runtime (`windeployqt`). Trimming is possible but was not attempted.
 - **A large toolchain dependency.** Qt ≥ 6.10 isn't in Ubuntu 24.04's repositories, and the
   first build compiles cxx-qt and qtbridge, which takes 2–3 minutes.
 - **Technology preview.** Qt Bridge for Rust is pre-1.0. Its API may change before general availability.
-- **No more bit-identical frames.** Version 1's software renderer produced identical
-  pixels on every platform. GPU output depends on the driver. The `--shot` mode keeps the
-  *state* deterministic, but not the pixels.
+- **No more bit-identical frames.** Stage 2's software renderer produced identical pixels on
+  every platform. GPU output depends on the driver. The `--shot` mode keeps the *state*
+  deterministic, but not the pixels.
 - **Licensing.** Qt and Qt Bridges are available under LGPL-3.0 or a commercial licence.
   Dynamic linking (the default here) is the usual LGPL route, but it needs to be stated
   correctly when distributing.
-- **Platform gaps.** There's no window icon on Linux yet: `cxx-qt-lib` exposes no
-  `QIcon`, so it would need a small C++ shim.
+- **Platform gaps.** There's no window icon on Linux yet: `cxx-qt-lib` exposes no `QIcon`,
+  so it would need a small C++ shim.
 
-## 8 · Takeaways
+## 9 · Takeaways
 
-1. **Draw the line at the engine.** Because the simulation never knew how it was drawn,
-   swapping the renderer didn't touch a line of puzzle logic. The new layer is
-   testable without a GUI, too.
-2. **Prefer one snapshot to many signals** when a UI shows a simulation. Frames stay
-   atomic and the bridge stays tiny.
-3. **Let the toolkit own the pixels.** The most valuable code deleted was the rasterizer
-   and font engine. The most valuable code gained was interaction that would have been
-   too expensive to build by hand: picking, orbiting, particles, animation curves.
-4. **Measure on the target.** The GPU-selection and environment-variable problems on
-   Windows only appeared on real hardware, and only fps logging plus Qt's own
-   `QSG_INFO` / `QSG_RENDER_TIMING` diagnostics made them visible.
+1. **A good engine survives every port.** The page's design (a pure clock, state carried
+   by the pieces, a net read from state) made it through a language change and a renderer
+   change. The 898-line engine went from stage 2 to stage 3 untouched.
+2. **Leaving the browser is expensive; a toolkit brings it back.** Most of stage 2's code
+   reproduced browser services. Qt replaced that layer with less code, and with a GPU 3D
+   engine on top.
+3. **Prefer one snapshot to many signals** when a UI shows a simulation. Frames stay atomic
+   and the bridge stays tiny.
+4. **AI-assisted porting works best with a way to check the result.** Being able to render
+   any exact instant in every stage made each port verifiable by eye, side by side.
+5. **Measure on the target.** The Windows GPU-selection and environment-variable problems
+   only appeared on real hardware, and only fps logging plus Qt's `QSG_INFO` and
+   `QSG_RENDER_TIMING` diagnostics made them visible.
 
 ---
 

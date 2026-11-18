@@ -323,15 +323,26 @@ to `.cargo/config.toml`.
 
 ### Windows 11
 
-You need Rust (MSVC), Visual Studio 2022 Build Tools, and Qt for MSVC 2022 x64. Then:
+Prerequisites: [Rust](https://rustup.rs) (default MSVC toolchain) and Visual Studio 2022
+Build Tools with the **"Desktop development with C++"** workload. The script checks both and
+tells you how to install whichever is missing. Then, from the cloned folder:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -QtDir C:\Qt\6.12.1\msvc2022_64 -Run
+.\build-windows.ps1 -InstallQt -Run
 ```
 
-This builds `dist\rubik_qt.exe` and bundles a portable folder with the Qt DLLs, QML
-plugins and the MSVC runtime. On hybrid-graphics laptops the app selects the discrete
-GPU itself. See [Engineering notes](#engineering-notes).
+- **Qt is found automatically:** `-QtDir`, then `$env:QMAKE`, then the newest
+  `C:\Qt\6.x\msvc2022_64` that is ≥ 6.10.
+- **`-InstallQt`** fetches Qt 6.12.1 for MSVC 2022 x64 (qtbase, qtdeclarative, qtquick3d,
+  qtshadertools, qtquicktimeline, qtsvg, qttools) straight from `download.qt.io` into
+  `C:\Qt` if none is found. That's about 300 MB, needs no Qt account, and is a one-time step.
+- The result is `dist\rubik_qt.exe`, a portable folder with the Qt DLLs, QML plugins and
+  the MSVC runtime.
+- On hybrid-graphics laptops the app selects the discrete GPU itself. See
+  [Engineering notes](#engineering-notes).
+
+If PowerShell refuses to run scripts, use
+`powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -InstallQt -Run`.
 
 ### Linux / WSL
 

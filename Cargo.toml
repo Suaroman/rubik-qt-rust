@@ -2,6 +2,8 @@
 name = "rubik_qt"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/Suaroman/rubik-qt-rust"
 description = "Rubik's Cube DNA observatory - the Rust engine with a Qt Quick / Qt Quick 3D front end via Qt Bridges"
 
 [dependencies]

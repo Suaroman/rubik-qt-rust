@@ -12,6 +12,7 @@ built on Qt Bridges.**
 ![Qt Quick 3D](https://img.shields.io/badge/Qt_Quick_3D-PBR_·_IBL_·_shadows-217346)
 ![Platforms](https://img.shields.io/badge/platforms-Windows_11_·_Linux_·_WSL-555)
 ![Tests](https://img.shields.io/badge/tests-18_passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 <img src="docs/images/hero.gif" alt="The Qt version: a physically based 3D cube mid-turn, with the DNA net and lighting instruments on either side" width="100%">
 
@@ -32,6 +33,7 @@ instrument (right) are all driven by one Rust simulation, frame by frame.</sub>
 - [Build & run](#build--run) · [Windows](#windows-11) · [Linux / WSL](#linux--wsl)
 - [Engineering notes](#engineering-notes)
 - [How this was built](#how-this-was-built)
+- [License](#license)
 - [The full write-up →](docs/WRITEUP.md)
 
 ---
@@ -375,6 +377,22 @@ This project is an experiment in **AI-assisted porting**, directed by the author
 
 The [full write-up](docs/WRITEUP.md) tells the story step by step: what each stage
 inherited, what Qt replaced, what went wrong, and what it cost.
+
+---
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE).
+
+Third-party components keep their own licences:
+
+- **Qt 6** and **Qt Bridge for Rust** (`qtbridge`): LGPL-3.0 or the Qt commercial
+  licence. This app links Qt dynamically, so a distributed build includes the Qt
+  libraries unmodified, alongside the executable.
+- **DejaVu fonts** (`src/qml/fonts/`): the Bitstream Vera / DejaVu font licence, which
+  permits redistribution. See [`LICENSE-DejaVu.txt`](src/qml/fonts/LICENSE-DejaVu.txt).
+- Rust crates: see `Cargo.lock`. They're under their own (mostly MIT / Apache-2.0)
+  licences.
 
 ---
 

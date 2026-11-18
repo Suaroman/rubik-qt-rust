@@ -23,14 +23,67 @@ instrument (right) are all driven by one Rust simulation, frame by frame.</sub>
 
 ---
 
+## Quick start
+
+You need **Rust**, a **C++ compiler** and **Qt 6.10+**. Most machines have none of these, so
+the steps below start from nothing. Allow about 20–30 minutes the first time, mostly
+downloads; after that, a rebuild takes seconds.
+
+<details open>
+<summary><b>Windows 10 / 11</b></summary>
+
+```powershell
+# 1. C++ build tools and Rust (one time; Windows asks for admin rights)
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install Rustlang.Rustup
+
+# 2. Close PowerShell and open a new window (so `cargo` is on PATH), then:
+git clone https://github.com/Suaroman/rubik-qt-rust
+cd rubik-qt-rust
+.\build-windows.ps1 -InstallQt -Run
+```
+
+`-InstallQt` downloads just the Qt modules this app needs (~300 MB, from `download.qt.io`, no
+Qt account) into `C:\Qt`, once. The script then builds, bundles a portable `dist\` folder,
+and launches the app. Next time, `.\build-windows.ps1 -Run` is enough.
+</details>
+
+<details>
+<summary><b>Ubuntu / Debian / WSL</b></summary>
+
+```bash
+# 1. Compiler, unzip tool and the X11/OpenGL libraries Qt needs (one time)
+sudo apt install build-essential curl 7zip libgl1 libegl1 libfontconfig1 libxkbcommon-x11-0 \
+  libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+  libxcb-render-util0 libxcb-shape0 libxcb-xkb1
+
+# 2. Rust (one time), then open a new terminal
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 3. Qt 6.12.1 into ~/Qt (one time, ~250 MB; distro Qt packages are too old)
+git clone https://github.com/Suaroman/rubik-qt-rust
+cd rubik-qt-rust
+tools/install-qt-linux.sh
+
+# 4. Build and run
+export QMAKE=~/Qt/6.12.1/gcc_64/bin/qmake
+cargo build --release && ./target/release/rubik_qt
+```
+</details>
+
+Stuck? See [Troubleshooting](#troubleshooting).
+
+---
+
 ## Contents
 
+- [Quick start](#quick-start)
 - [The journey: HTML → Rust → Qt](#the-journey-html--rust--qt)
 - [Same moment, three renderers](#same-moment-three-renderers)
 - [Why Qt? Eight things it gave this project](#why-qt-eight-things-it-gave-this-project)
 - [Architecture](#architecture)
 - [Features & controls](#features--controls)
-- [Build & run](#build--run) · [Windows](#windows-11) · [Linux / WSL](#linux--wsl)
+- [Build & run in detail](#build--run-in-detail) · [Troubleshooting](#troubleshooting)
 - [Engineering notes](#engineering-notes)
 - [How this was built](#how-this-was-built)
 - [License](#license)
@@ -273,6 +326,7 @@ flowchart LR
 | [`src/qml/`](src/qml) | The UI: `Main`, `CubeView` (3D), `Hud`, `DnaPanel`, `LightingPanel`, `Background`, small components |
 | [`tests/`](tests) | The page's own `selfTest()` / `verifySequence()` checks, ported |
 | [`tools/make_studio_hdr.py`](tools/make_studio_hdr.py) | Generates the HDR studio light probe (standard library only) |
+| [`build-windows.ps1`](build-windows.ps1) · [`tools/install-qt-linux.sh`](tools/install-qt-linux.sh) | One-command setup: install Qt if needed, build, bundle |
 
 ---
 
@@ -314,46 +368,54 @@ the same line the HTML page logged to its console.
 
 ---
 
-## Build & run
+## Build & run in detail
 
-**Requirements:** Rust ≥ 1.88 · a C++ compiler · **Qt ≥ 6.10** with `qtbase`,
-`qtdeclarative`, `qtquick3d`, `qtshadertools` and `qtquicktimeline`. Qt Bridges finds Qt
-through `qmake`: set `QMAKE`, or copy [`.cargo/config.toml.example`](.cargo/config.toml.example)
-to `.cargo/config.toml`.
+**Requirements:** Rust ≥ 1.88 · a C++ compiler (MSVC 2022 on Windows, GCC/Clang on Linux) ·
+**Qt ≥ 6.10** with `qtbase`, `qtdeclarative`, `qtquick3d`, `qtshadertools` and
+`qtquicktimeline`. Qt Bridges finds Qt through `qmake`, via the `QMAKE` environment
+variable (or copy [`.cargo/config.toml.example`](.cargo/config.toml.example) to
+`.cargo/config.toml`).
 
-### Windows 11
+### Windows: `build-windows.ps1`
 
-Prerequisites: [Rust](https://rustup.rs) (default MSVC toolchain) and Visual Studio 2022
-Build Tools with the **"Desktop development with C++"** workload. The script checks both and
-tells you how to install whichever is missing. Then, from the cloned folder:
+| Option | What it does |
+|---|---|
+| *(none)* | Finds Qt (`-QtDir`, then `$env:QMAKE`, then the newest `C:\Qt\6.x\msvc2022_64` ≥ 6.10), builds, bundles `dist\` |
+| `-InstallQt` | If no suitable Qt is found, installs Qt 6.12.1 (MSVC 2022 x64) from `download.qt.io` into `C:\Qt` first |
+| `-QtDir <path>` | Use a specific Qt, e.g. one from the Qt online installer: `-QtDir C:\Qt\6.12.1\msvc2022_64` |
+| `-Run` | Launch the app when the build finishes |
 
-```powershell
-.\build-windows.ps1 -InstallQt -Run
-```
+`dist\` contains the Qt DLLs, QML plugins and the MSVC runtime, so you can copy it to
+another Windows PC that has no Rust, Qt or Visual Studio installed. On hybrid-graphics
+laptops the app selects the discrete GPU itself
+([Engineering notes](#engineering-notes)).
 
-- **Qt is found automatically:** `-QtDir`, then `$env:QMAKE`, then the newest
-  `C:\Qt\6.x\msvc2022_64` that is ≥ 6.10.
-- **`-InstallQt`** fetches Qt 6.12.1 for MSVC 2022 x64 (qtbase, qtdeclarative, qtquick3d,
-  qtshadertools, qtquicktimeline, qtsvg, qttools) straight from `download.qt.io` into
-  `C:\Qt` if none is found. That's about 300 MB, needs no Qt account, and is a one-time step.
-- The result is `dist\rubik_qt.exe`, a portable folder with the Qt DLLs, QML plugins and
-  the MSVC runtime.
-- On hybrid-graphics laptops the app selects the discrete GPU itself. See
-  [Engineering notes](#engineering-notes).
+### Linux: `tools/install-qt-linux.sh`
 
-If PowerShell refuses to run scripts, use
-`powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -InstallQt -Run`.
-
-### Linux / WSL
+Installs Qt (default 6.12.1) for `gcc_64` from `download.qt.io` into `~/Qt`. Set `QT_ROOT`
+to install elsewhere, or pass a version: `tools/install-qt-linux.sh 6.12.1`. If you already
+have Qt ≥ 6.10 (e.g. from the Qt online installer), skip it and point `QMAKE` at that
+install's `bin/qmake`. `build.rs` bakes Qt's library path into the binary, so
+`LD_LIBRARY_PATH` isn't needed.
 
 ```bash
-export QMAKE=~/Qt/6.12.1/gcc_64/bin/qmake
-cargo build --release
-./target/release/rubik_qt
 cargo test --release         # 18 tests: the page's self-checks, meshes, simulation
 ```
 
-`build.rs` bakes Qt's library path into the binary, so `LD_LIBRARY_PATH` isn't needed.
+### Troubleshooting
+
+| You see | Fix |
+|---|---|
+| `Rust is not installed` | Windows: `winget install Rustlang.Rustup`. Linux: the `rustup` line in [Quick start](#quick-start). Then **open a new terminal**. |
+| `error: no default toolchain configured` | `rustup default stable` |
+| `The MSVC C++ build tools are missing` | Run the `winget install Microsoft.VisualStudio.2022.BuildTools …` command the script prints, then open a new terminal |
+| `No Qt >= 6.10 … found` | Add `-InstallQt`, or pass `-QtDir` to an existing Qt |
+| `Qt … is missing qml\QtQuick3D` | Your Qt lacks a module: add Qt Quick 3D, Qt Quick Timeline and Qt Shader Tools in the Qt Maintenance Tool, or use `-InstallQt` |
+| `running scripts is disabled on this system` | `powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -InstallQt -Run` |
+| `Could not update dist\rubik_qt.exe` | The app is still running. Close it and re-run |
+| Linux: `qmake` / Qt errors during `cargo build` | Check `echo $QMAKE` points at Qt ≥ 6.10 (`$QMAKE -query QT_VERSION`) |
+| Linux: `could not load the Qt platform plugin "xcb"` | Install the `libxcb-*` packages from [Quick start](#quick-start) step 1 |
+| WSL: about 3 fps | Handled automatically (d3d12 GPU driver). If you set `GALLIUM_DRIVER` or `QT_QPA_PLATFORM` yourself, the app leaves them alone |
 
 ---
 
